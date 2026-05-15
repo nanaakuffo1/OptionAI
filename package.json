@@ -1,0 +1,13 @@
+{
+  "name": "optionai-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OptionAI public options dashboard with server-side access controls.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
