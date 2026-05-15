@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OptionAI</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <section class="auth-screen" id="authScreen">
+    <main class="login-panel">
+      <div class="mark">OptionAI</div>
+      <h1>Protected Trading Workspace</h1>
+      <p>Sign in with an approved Supabase account to view the dashboard.</p>
+      <form id="authForm">
+        <input id="authEmail" type="email" autocomplete="email" placeholder="Email" required />
+        <input id="authPassword" type="password" autocomplete="current-password" placeholder="Password" required />
+        <button type="submit">Sign In</button>
+      </form>
+      <div class="login-error" id="authMessage"></div>
+    </main>
+  </section>
+
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">OA</div>
+        <div>
+          <strong>OptionAI</strong>
+          <span>Options intelligence workspace</span>
+        </div>
+      </div>
+      <div class="quote-strip">
+        <span id="quoteTicker">AAPL</span>
+        <strong id="quotePrice">$189.20</strong>
+        <span id="quoteChange" class="up">+0.84%</span>
+      </div>
+      <form id="tickerForm" class="ticker-form">
+        <input id="tickerInput" maxlength="8" placeholder="Ticker" value="AAPL" />
+        <button type="submit">Analyze</button>
+      </form>
+      <button class="logout" id="logoutButton" type="button">Logout</button>
+    </header>
+
+    <main class="workspace">
+      <aside class="watchlist" id="watchlist"></aside>
+
+      <section class="center">
+        <div class="chart-head">
+          <div>
+            <h1 id="pageTitle">AAPL Options Desk</h1>
+            <p id="pageSubtitle">Synthetic chain, Greeks, strategy builder, and position risk controls.</p>
+          </div>
+          <div class="verdict" id="verdictPill">Neutral</div>
+        </div>
+        <div class="chart-frame">
+          <iframe id="tvChart" title="TradingView chart"></iframe>
+        </div>
+
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="chain">Chain</button>
+          <button class="tab" data-tab="greeks">Greeks</button>
+          <button class="tab" data-tab="strategies">Strategies</button>
+        </div>
+
+        <section class="panel active" id="chainPanel">
+          <div class="panel-toolbar">
+            <label>Expiry <select id="expirySelect"></select></label>
+            <label>IV <input id="ivInput" type="number" min="1" max="250" step="1" value="32" /></label>
+            <span id="chainMeta"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th colspan="5">Calls</th><th>Strike</th><th colspan="5">Puts</th></tr>
+                <tr><th>Bid</th><th>Ask</th><th>Delta</th><th>IV</th><th>Vol</th><th></th><th>Vol</th><th>IV</th><th>Delta</th><th>Ask</th><th>Bid</th></tr>
+              </thead>
+              <tbody id="chainBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel" id="greeksPanel">
+          <div class="calc-grid">
+            <label>Stock <input id="stockInput" type="number" step="0.01" /></label>
+            <label>Strike <input id="strikeInput" type="number" step="0.01" /></label>
+            <label>Expiry <input id="calcExpiry" type="date" /></label>
+            <label>Rate % <input id="rateInput" type="number" step="0.01" value="5.25" /></label>
+            <label>Type <select id="typeInput"><option value="call">Call</option><option value="put">Put</option></select></label>
+          </div>
+          <div class="metric-grid" id="greekMetrics"></div>
+        </section>
+
+        <section class="panel" id="strategiesPanel">
+          <div class="strategy-grid" id="strategyGrid"></div>
+        </section>
+      </section>
+
+      <aside class="right-rail">
+        <section class="advisor-card">
+          <div class="section-label">Advisor</div>
+          <h2 id="advisorTitle">Balanced setup</h2>
+          <p id="advisorText"></p>
+          <div class="signal-list" id="signals"></div>
+        </section>
+
+        <section class="position-card">
+          <div class="section-label">Portfolio</div>
+          <form id="positionForm" class="position-form">
+            <input id="posSymbol" placeholder="Ticker" />
+            <select id="posType"><option value="call">Call</option><option value="put">Put</option></select>
+            <input id="posStrike" type="number" placeholder="Strike" />
+            <input id="posExpiry" type="date" />
+            <input id="posPremium" type="number" step="0.01" placeholder="Entry" />
+            <input id="posQty" type="number" min="1" value="1" />
+            <button type="submit">Add Position</button>
+          </form>
+          <div id="positions"></div>
+          <div class="portfolio-total" id="portfolioTotal"></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./supabase-config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
