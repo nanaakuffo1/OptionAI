@@ -34,7 +34,7 @@
         <div class="brand-mark">OA</div>
         <div>
           <strong>OptionAI</strong>
-          <span>Options intelligence workspace</span>
+          <span>Advanced options statistics calculator</span>
         </div>
       </div>
       <div class="quote-strip">
@@ -44,7 +44,7 @@
       </div>
       <form id="tickerForm" class="ticker-form">
         <input id="tickerInput" maxlength="8" placeholder="Ticker" value="AAPL" />
-        <button type="submit">Analyze</button>
+        <button type="submit">Run Model</button>
       </form>
       <button class="logout" id="logoutButton" type="button">Logout</button>
     </header>
@@ -56,12 +56,37 @@
         <div class="chart-head">
           <div>
             <h1 id="pageTitle">AAPL Options Desk</h1>
-            <p id="pageSubtitle">Synthetic chain, Greeks, strategy builder, and position risk controls.</p>
+            <p id="pageSubtitle">Educational analytics only. Not financial advice.</p>
           </div>
-          <div class="verdict" id="verdictPill">Neutral</div>
+          <div class="verdict" id="verdictPill">NEUTRAL</div>
+        </div>
+        <div class="model-controls">
+          <label>Trend <select id="trendInput"><option value="short">Short</option><option value="balanced" selected>Balanced</option><option value="long">Long</option></select></label>
+          <label>Vol Regime <select id="volRegimeInput"><option value="low">Low</option><option value="normal" selected>Normal</option><option value="high">High</option></select></label>
+          <label>Auto Pulse <input id="autoPulseInput" type="checkbox" checked /></label>
         </div>
         <div class="chart-frame">
-          <iframe id="tvChart" title="TradingView chart"></iframe>
+          <div class="chart-toolbar">
+            <div>
+              <span class="section-label">OptionAI Native Chart</span>
+              <strong id="chartTitle">AAPL modeled price path</strong>
+            </div>
+            <div class="chart-actions" id="rangeButtons">
+              <button type="button" data-range="1D">1D</button>
+              <button type="button" data-range="5D">5D</button>
+              <button type="button" data-range="1M" class="active">1M</button>
+              <button type="button" data-range="3M">3M</button>
+            </div>
+            <div class="chart-actions" id="chartModeButtons">
+              <button type="button" data-mode="candles" class="active">Candles</button>
+              <button type="button" data-mode="line">Line</button>
+            </div>
+          </div>
+          <canvas id="priceChart" width="1200" height="430" aria-label="OptionAI native modeled price chart"></canvas>
+          <div class="chart-foot">
+            <span id="chartReadout">Move over the chart for OHLC details.</span>
+            <span id="chartStatus">Modeled pulse. No private market-data key exposed.</span>
+          </div>
         </div>
 
         <div class="tabs" role="tablist">
@@ -104,11 +129,14 @@
       </section>
 
       <aside class="right-rail">
-        <section class="advisor-card">
-          <div class="section-label">Advisor</div>
-          <h2 id="advisorTitle">Balanced setup</h2>
-          <p id="advisorText"></p>
+        <section class="model-card">
+          <div class="section-label">Statistical Signal</div>
+          <h2 id="modelTitle">Neutral model output</h2>
+          <p id="modelText"></p>
+          <div class="scorebar"><span id="scoreFill"></span></div>
           <div class="signal-list" id="signals"></div>
+          <div class="model-explanation" id="modelExplanation"></div>
+          <p class="disclaimer">Educational analytics only. Not financial advice.</p>
         </section>
 
         <section class="position-card">
@@ -120,6 +148,8 @@
             <input id="posExpiry" type="date" />
             <input id="posPremium" type="number" step="0.01" placeholder="Entry" />
             <input id="posQty" type="number" min="1" value="1" />
+            <input id="posStop" type="number" step="0.01" placeholder="Alert < $" />
+            <input id="posTarget" type="number" step="0.01" placeholder="Alert > $" />
             <button type="submit">Add Position</button>
           </form>
           <div id="positions"></div>
