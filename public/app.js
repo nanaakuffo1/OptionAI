@@ -92,6 +92,43 @@ function pct(v) { return `${Number(v) >= 0 ? "+" : ""}${Number(v).toFixed(2)}%`;
 function r5(v) { return Math.round(v / 5) * 5; }
 function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
 
+function loadPrefs() {
+  try {
+    return JSON.parse(window.localStorage?.getItem("optionai:prefs") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function savePrefs(patch = {}) {
+  try {
+    const current = loadPrefs();
+    window.localStorage?.setItem("optionai:prefs", JSON.stringify({ ...current, ...patch }));
+  } catch {
+    // Storage can be unavailable in private browsing or strict file contexts.
+  }
+}
+
+function applyPrefs() {
+  const prefs = loadPrefs();
+  if (typeof prefs.liveFeed === "boolean") qs("liveFeedInput").checked = prefs.liveFeed;
+  if (typeof prefs.autoPulse === "boolean") qs("autoPulseInput").checked = prefs.autoPulse;
+  if (prefs.trend) qs("trendInput").value = prefs.trend;
+  if (prefs.volRegime) qs("volRegimeInput").value = prefs.volRegime;
+  if (prefs.chartRange) {
+    state.chartRange = prefs.chartRange;
+    document.querySelectorAll("#rangeButtons button").forEach((button) => {
+      button.classList.toggle("active", button.dataset.range === state.chartRange);
+    });
+  }
+  if (prefs.chartMode) {
+    state.chartMode = prefs.chartMode;
+    document.querySelectorAll("#chartModeButtons button").forEach((button) => {
+      button.classList.toggle("active", button.dataset.mode === state.chartMode);
+    });
+  }
+}
+
 const supabaseConfig = window.OPTIONAI_SUPABASE || {};
 const hasSupabaseConfig = Boolean(
   supabaseConfig.url &&
@@ -802,6 +839,7 @@ function initChartEvents() {
     const button = event.target.closest("button[data-range]");
     if (!button) return;
     state.chartRange = button.dataset.range;
+    savePrefs({ chartRange: state.chartRange });
     document.querySelectorAll("#rangeButtons button").forEach((item) => item.classList.toggle("active", item === button));
     generateCandles(state.ticker);
     renderAll();
@@ -810,13 +848,18 @@ function initChartEvents() {
     const button = event.target.closest("button[data-mode]");
     if (!button) return;
     state.chartMode = button.dataset.mode;
+    savePrefs({ chartMode: state.chartMode });
     document.querySelectorAll("#chartModeButtons button").forEach((item) => item.classList.toggle("active", item === button));
     drawChart();
   });
   qs("liveFeedInput").addEventListener("change", () => {
+    savePrefs({ liveFeed: qs("liveFeedInput").checked });
     if (qs("liveFeedInput").checked) startLiveFeed();
     else stopLiveFeed();
     if (!qs("liveFeedInput").checked) liveStatus("Modeled pulse. No private market-data key exposed.");
+  });
+  qs("autoPulseInput").addEventListener("change", () => {
+    savePrefs({ autoPulse: qs("autoPulseInput").checked });
   });
   window.addEventListener("resize", resizeChart);
   state.pulseTimer = window.setInterval(pulseChart, 4500);
@@ -830,6 +873,7 @@ function init() {
   qs("posExpiry").value = qs("expirySelect").value;
   buildWatchlist();
   initChartEvents();
+  applyPrefs();
 
   document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("active", item === tab));
@@ -843,6 +887,10 @@ function init() {
   });
 
   ["expirySelect", "ivInput", "trendInput", "volRegimeInput", "rateInput"].forEach((id) => qs(id).addEventListener("input", () => {
+    savePrefs({
+      trend: qs("trendInput").value,
+      volRegime: qs("volRegimeInput").value
+    });
     qs("calcExpiry").value = qs("expirySelect").value;
     generateCandles(state.ticker);
     renderAll();
