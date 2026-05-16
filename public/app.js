@@ -1,7 +1,10 @@
 const WL = [
-  ["AI Infrastructure", ["NVDA", "AMD", "AVGO", "ARM"]],
-  ["Megacap Tech", ["AAPL", "MSFT", "META", "GOOGL", "AMZN", "TSLA"]],
-  ["Semis", ["MU", "QCOM", "MRVL", "INTC"]],
+  ["Robotics", ["SVT", "SYM", "TSLA"]],
+  ["Photonic/Optic", ["AAOI", "COHR", "LITE"]],
+  ["Networking", ["ANET", "AVGO", "CSCO", "MRVL", "NOK"]],
+  ["Memory Guys", ["DRAM", "MU", "SNDK", "STX", "WDC"]],
+  ["Magnificent 7", ["META", "AMZN", "NVDA", "MSFT", "GOOGL", "AAPL", "TSLA"]],
+  ["AGI Infrastructure", ["NVDA", "RGTI", "QBTS", "IONQ"]],
   ["High Beta", ["PLTR", "COIN", "RBLX", "SHOP"]]
 ];
 
@@ -10,7 +13,11 @@ const quotes = {
   META: [471.4, 0.74], GOOGL: [174.3, -0.16], TSLA: [184.8, -1.72], AMD: [161.5, 1.11],
   AVGO: [1398.2, 0.67], ARM: [118.5, 2.22], MU: [126.7, 0.35], QCOM: [205.9, -0.4],
   MRVL: [78.6, 0.91], INTC: [31.9, -0.7], PLTR: [24.2, 3.1], COIN: [228.6, -2.3],
-  RBLX: [38.7, 1.4], SHOP: [63.8, 0.5]
+  RBLX: [38.7, 1.4], SHOP: [63.8, 0.5], SVT: [47.4, 1.2], SYM: [39.6, 0.8],
+  AAOI: [18.7, 2.1], COHR: [68.4, -0.3], LITE: [52.9, 0.4], ANET: [318.2, 1.1],
+  CSCO: [48.3, -0.2], NOK: [3.9, 0.3], DRAM: [8.7, 0.9], SNDK: [74.5, 0.7],
+  STX: [91.8, -0.5], WDC: [63.2, 0.6], RGTI: [1.8, 3.4], QBTS: [1.4, 2.8],
+  IONQ: [9.9, 1.6]
 };
 
 const strategyCatalog = [
@@ -102,6 +109,7 @@ const state = {
     quotes: {},
     baseline: {}
   },
+  dashboard: "focus",
   positionId: 1,
   resetInputs: true
 };
@@ -154,6 +162,17 @@ function applyPrefs() {
       button.classList.toggle("active", button.dataset.mode === state.chartMode);
     });
   }
+  if (prefs.dashboard) setDashboard(prefs.dashboard, false);
+}
+
+function setDashboard(mode, persist = true) {
+  state.dashboard = ["focus", "research", "portfolio"].includes(mode) ? mode : "focus";
+  document.querySelector(".workspace")?.setAttribute("data-dashboard", state.dashboard);
+  document.querySelectorAll("[data-dashboard]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.dashboard === state.dashboard);
+  });
+  if (persist) savePrefs({ dashboard: state.dashboard });
+  resizeChart();
 }
 
 function renderIndicatorControls() {
@@ -1210,6 +1229,11 @@ function initChartEvents() {
     savePrefs({ chartMode: state.chartMode });
     document.querySelectorAll("#chartModeButtons button").forEach((item) => item.classList.toggle("active", item === button));
     drawChart();
+  });
+  qs("dashboardSwitcher").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-dashboard]");
+    if (!button) return;
+    setDashboard(button.dataset.dashboard);
   });
   qs("liveFeedInput").addEventListener("change", () => {
     savePrefs({ liveFeed: qs("liveFeedInput").checked });
