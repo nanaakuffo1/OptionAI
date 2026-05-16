@@ -6,6 +6,8 @@ It includes:
 
 - Supabase email/password sign-in gate for GitHub Pages
 - Native OptionAI canvas chart with modeled pulse and optional secure live feed
+- Toggleable VWAP, SMA, EMA, order block, fair value gap, and trend-state overlays
+- Indicator confluence scoring that feeds the CALL / PUT / NEUTRAL model output
 - Synthetic Black-Scholes options chain
 - Greeks calculator
 - Strategy cards

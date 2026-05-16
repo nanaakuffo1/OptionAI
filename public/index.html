@@ -83,6 +83,16 @@
               <button type="button" data-mode="line">Line</button>
             </div>
           </div>
+          <div class="indicator-bar" id="indicatorControls">
+            <label title="Volume weighted average price"><input type="checkbox" data-indicator="vwap" checked /> VWAP</label>
+            <label title="20-period simple moving average"><input type="checkbox" data-indicator="sma" /> SMA</label>
+            <label title="21-period exponential moving average"><input type="checkbox" data-indicator="ema" checked /> EMA</label>
+            <label title="High-volume reversal zones"><input type="checkbox" data-indicator="orderBlocks" /> Order Blocks</label>
+            <label title="Three-candle imbalance zones"><input type="checkbox" data-indicator="fvg" /> Fair Value Gaps</label>
+            <label title="Calculated trend state"><input type="checkbox" data-indicator="trend" checked /> Trend</label>
+            <button type="button" id="resetIndicators">Reset</button>
+            <span class="trend-pill neutral" id="trendStatePill">Trend: Neutral</span>
+          </div>
           <canvas id="priceChart" width="1200" height="430" aria-label="OptionAI native modeled price chart"></canvas>
           <div class="chart-foot">
             <span id="chartReadout">Move over the chart for OHLC details.</span>
@@ -136,6 +146,7 @@
           <p id="modelText"></p>
           <div class="scorebar"><span id="scoreFill"></span></div>
           <div class="signal-list" id="signals"></div>
+          <div class="confluence-panel" id="confluencePanel"></div>
           <div class="model-explanation" id="modelExplanation"></div>
           <p class="disclaimer">Educational analytics only. Not financial advice.</p>
         </section>

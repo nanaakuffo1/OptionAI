@@ -74,6 +74,24 @@ const state = {
   chartMode: "candles",
   chartHover: null,
   candles: [],
+  indicators: {
+    vwap: true,
+    sma: false,
+    ema: true,
+    orderBlocks: false,
+    fvg: false,
+    trend: true
+  },
+  indicatorData: {
+    vwap: [],
+    sma: [],
+    ema: [],
+    orderBlocks: [],
+    fvg: [],
+    confluence: [],
+    trendState: "neutral",
+    confluenceScore: 0
+  },
   model: null,
   pulseTimer: null,
   liveTimer: null,
@@ -115,6 +133,12 @@ function applyPrefs() {
   if (typeof prefs.autoPulse === "boolean") qs("autoPulseInput").checked = prefs.autoPulse;
   if (prefs.trend) qs("trendInput").value = prefs.trend;
   if (prefs.volRegime) qs("volRegimeInput").value = prefs.volRegime;
+  if (prefs.indicators) {
+    state.indicators = { ...state.indicators, ...prefs.indicators };
+  }
+  document.querySelectorAll("[data-indicator]").forEach((input) => {
+    input.checked = Boolean(state.indicators[input.dataset.indicator]);
+  });
   if (prefs.chartRange) {
     state.chartRange = prefs.chartRange;
     document.querySelectorAll("#rangeButtons button").forEach((button) => {
@@ -308,6 +332,130 @@ function syntheticQuote(ticker) {
   return [price, change];
 }
 
+function rollingSma(period = 20) {
+  return state.candles.map((_, index) => {
+    if (index + 1 < period) return null;
+    const slice = state.candles.slice(index + 1 - period, index + 1);
+    return slice.reduce((sum, c) => sum + c.close, 0) / period;
+  });
+}
+
+function rollingEma(period = 21) {
+  const k = 2 / (period + 1);
+  let ema = null;
+  return state.candles.map((c, index) => {
+    if (ema === null) {
+      const seed = state.candles.slice(0, Math.min(period, index + 1));
+      ema = seed.reduce((sum, item) => sum + item.close, 0) / seed.length;
+    } else {
+      ema = c.close * k + ema * (1 - k);
+    }
+    return ema;
+  });
+}
+
+function rollingVwap() {
+  let pv = 0;
+  let vol = 0;
+  return state.candles.map((c) => {
+    const typical = (c.high + c.low + c.close) / 3;
+    pv += typical * c.volume;
+    vol += c.volume;
+    return vol ? pv / vol : typical;
+  });
+}
+
+function detectOrderBlocks() {
+  const blocks = [];
+  const volumes = state.candles.map((c) => c.volume);
+  const avgVolume = volumes.reduce((sum, v) => sum + v, 0) / Math.max(1, volumes.length);
+  for (let i = 2; i < state.candles.length - 2; i += 1) {
+    const c = state.candles[i];
+    const next = state.candles[i + 1];
+    const wide = Math.abs(c.close - c.open) > (c.high - c.low) * 0.42;
+    const highVolume = c.volume > avgVolume * 1.18;
+    if (!wide || !highVolume) continue;
+    if (c.close < c.open && next.close > c.high) {
+      blocks.push({ start: i, end: state.candles.length - 1, low: c.low, high: c.open, type: "bullish" });
+    }
+    if (c.close > c.open && next.close < c.low) {
+      blocks.push({ start: i, end: state.candles.length - 1, low: c.open, high: c.high, type: "bearish" });
+    }
+  }
+  return blocks.slice(-4);
+}
+
+function detectFairValueGaps() {
+  const gaps = [];
+  for (let i = 2; i < state.candles.length; i += 1) {
+    const left = state.candles[i - 2];
+    const right = state.candles[i];
+    if (right.low > left.high) {
+      gaps.push({ start: i - 2, end: state.candles.length - 1, low: left.high, high: right.low, type: "bullish" });
+    }
+    if (right.high < left.low) {
+      gaps.push({ start: i - 2, end: state.candles.length - 1, low: right.high, high: left.low, type: "bearish" });
+    }
+  }
+  return gaps.slice(-5);
+}
+
+function calculateIndicators() {
+  const sma = rollingSma(20);
+  const ema = rollingEma(21);
+  const vwap = rollingVwap();
+  const orderBlocks = detectOrderBlocks();
+  const fvg = detectFairValueGaps();
+  const last = state.candles[state.candles.length - 1];
+  const lastSma = sma[sma.length - 1] || last.close;
+  const lastEma = ema[ema.length - 1] || last.close;
+  const lastVwap = vwap[vwap.length - 1] || last.close;
+  const emaPrev = ema[Math.max(0, ema.length - 8)] || lastEma;
+  const emaSlope = ((lastEma - emaPrev) / Math.max(0.01, emaPrev)) * 100;
+  const nearPct = Math.abs(last.close - lastVwap) / last.close * 100;
+  const confluence = [];
+
+  const add = (label, score, value) => {
+    confluence.push({
+      label,
+      score,
+      value,
+      side: score > 0.5 ? "call" : score < -0.5 ? "put" : "neutral"
+    });
+  };
+
+  add("VWAP", last.close > lastVwap ? 12 : -12, last.close > lastVwap ? "Above" : "Below");
+  add("EMA", last.close > lastEma && emaSlope > 0 ? 14 : last.close < lastEma && emaSlope < 0 ? -14 : 0, `${emaSlope >= 0 ? "+" : ""}${emaSlope.toFixed(2)}% slope`);
+  add("SMA", last.close > lastSma ? 8 : -8, last.close > lastSma ? "Above" : "Below");
+
+  const activeBlock = [...orderBlocks].reverse().find((block) => last.close >= block.low && last.close <= block.high);
+  if (activeBlock) add("Order block", activeBlock.type === "bullish" ? 10 : -10, activeBlock.type);
+  else add("Order block", 0, "No active zone");
+
+  const activeGap = [...fvg].reverse().find((gap) => last.close >= gap.low && last.close <= gap.high);
+  if (activeGap) add("Fair value gap", activeGap.type === "bullish" ? 9 : -9, activeGap.type);
+  else add("Fair value gap", 0, "No active gap");
+
+  let trendState = "neutral";
+  if (last.close > lastVwap && lastEma > lastSma && emaSlope > 0.05) trendState = "bullish";
+  else if (last.close < lastVwap && lastEma < lastSma && emaSlope < -0.05) trendState = "bearish";
+  else if (nearPct < 0.35 || Math.abs(emaSlope) < 0.03) trendState = "range";
+
+  const trendScore = trendState === "bullish" ? 16 : trendState === "bearish" ? -16 : 0;
+  add("Trend state", trendScore, trendState);
+
+  state.indicatorData = {
+    sma,
+    ema,
+    vwap,
+    orderBlocks,
+    fvg,
+    confluence,
+    trendState,
+    confluenceScore: confluence.reduce((sum, item) => sum + item.score, 0)
+  };
+}
+
 function resizeChart() {
   const canvas = qs("priceChart");
   if (!canvas) return;
@@ -363,8 +511,11 @@ function drawChart() {
     ctx.fillText(money(price), width - pad.right + 10, y + 4);
   }
 
+  drawIndicatorZones(ctx, xFor, yFor, pad, width, height);
   if (state.chartMode === "line") drawLineChart(ctx, xFor, yFor, pad, width, height);
   else drawCandles(ctx, xFor, yFor, plotW);
+  drawIndicatorLines(ctx, xFor, yFor);
+  drawTrendBadge(ctx, pad);
 
   const last = state.candles[state.candles.length - 1];
   const lastY = yFor(last.close);
@@ -379,6 +530,75 @@ function drawChart() {
   ctx.fillText(money(last.close), width - pad.right + 10, lastY - 8);
 
   if (state.chartHover !== null) drawCrosshair(ctx, xFor, yFor, pad, width, height);
+}
+
+function drawIndicatorZones(ctx, xFor, yFor, pad, width, height) {
+  const drawZone = (zone, color) => {
+    const x = xFor(zone.start);
+    const y1 = yFor(zone.high);
+    const y2 = yFor(zone.low);
+    ctx.fillStyle = color;
+    ctx.fillRect(x, Math.min(y1, y2), width - pad.right - x, Math.max(2, Math.abs(y2 - y1)));
+  };
+  if (state.indicators.orderBlocks) {
+    state.indicatorData.orderBlocks.forEach((zone) => {
+      drawZone(zone, zone.type === "bullish" ? "rgba(66, 217, 130, 0.08)" : "rgba(255, 100, 115, 0.08)");
+    });
+  }
+  if (state.indicators.fvg) {
+    state.indicatorData.fvg.forEach((zone) => {
+      drawZone(zone, zone.type === "bullish" ? "rgba(106, 180, 255, 0.07)" : "rgba(245, 185, 66, 0.07)");
+    });
+  }
+}
+
+function drawSeriesLine(ctx, series, xFor, yFor, color, dash = []) {
+  ctx.beginPath();
+  let started = false;
+  series.forEach((value, index) => {
+    if (value === null || !Number.isFinite(value)) return;
+    const x = xFor(index);
+    const y = yFor(value);
+    if (!started) {
+      ctx.moveTo(x, y);
+      started = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+  if (!started) return;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.6;
+  ctx.setLineDash(dash);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function drawIndicatorLines(ctx, xFor, yFor) {
+  if (state.indicators.vwap) drawSeriesLine(ctx, state.indicatorData.vwap, xFor, yFor, "rgba(245, 185, 66, 0.78)", [5, 4]);
+  if (state.indicators.sma) drawSeriesLine(ctx, state.indicatorData.sma, xFor, yFor, "rgba(185, 144, 255, 0.72)", [2, 4]);
+  if (state.indicators.ema) drawSeriesLine(ctx, state.indicatorData.ema, xFor, yFor, "rgba(106, 180, 255, 0.82)");
+}
+
+function drawTrendBadge(ctx, pad) {
+  if (!state.indicators.trend) return;
+  const trend = state.indicatorData.trendState;
+  const label = `Trend: ${trend[0].toUpperCase()}${trend.slice(1)}`;
+  ctx.font = "12px system-ui, sans-serif";
+  const width = ctx.measureText ? ctx.measureText(label).width + 18 : 110;
+  ctx.fillStyle = trend === "bullish" ? "rgba(66, 217, 130, 0.12)" : trend === "bearish" ? "rgba(255, 100, 115, 0.12)" : "rgba(245, 185, 66, 0.12)";
+  ctx.strokeStyle = trend === "bullish" ? "rgba(66, 217, 130, 0.42)" : trend === "bearish" ? "rgba(255, 100, 115, 0.42)" : "rgba(245, 185, 66, 0.42)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect?.(pad.left + 10, pad.top + 8, width, 26, 8);
+  if (ctx.roundRect) {
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.fillRect(pad.left + 10, pad.top + 8, width, 26);
+  }
+  ctx.fillStyle = trend === "bullish" ? "#42d982" : trend === "bearish" ? "#ff6473" : "#f5b942";
+  ctx.fillText(label, pad.left + 19, pad.top + 26);
 }
 
 function drawLineChart(ctx, xFor, yFor, pad, width, height) {
@@ -576,7 +796,17 @@ function calculateModel() {
   const trendScore = clamp(state.change / 4, -1, 1) * 28;
   const smaScore = clamp(priceVsSma / 4, -1, 1) * 18;
   const ivDrag = Math.max(0, iv - 65) * 0.28;
-  const score = clamp((momentumScore + trendScore + smaScore) * scopeMultiplier * volMultiplier, -100, 100);
+  const enabledConfluence = state.indicatorData.confluence.filter((item) => {
+    if (item.label === "VWAP") return state.indicators.vwap;
+    if (item.label === "EMA") return state.indicators.ema;
+    if (item.label === "SMA") return state.indicators.sma;
+    if (item.label === "Order block") return state.indicators.orderBlocks;
+    if (item.label === "Fair value gap") return state.indicators.fvg;
+    if (item.label === "Trend state") return state.indicators.trend;
+    return true;
+  });
+  const confluenceScore = enabledConfluence.reduce((sum, item) => sum + item.score, 0);
+  const score = clamp((momentumScore + trendScore + smaScore + confluenceScore * 0.45) * scopeMultiplier * volMultiplier, -100, 100);
   const adjusted = score > 0 ? score - ivDrag : score + ivDrag;
   const output = adjusted > 18 ? "CALL" : adjusted < -18 ? "PUT" : "NEUTRAL";
   const confidence = clamp(42 + Math.abs(adjusted) * 0.48 - Math.max(0, iv - rv) * 0.08 - (dte < 7 ? 9 : 0), 18, 94);
@@ -587,16 +817,18 @@ function calculateModel() {
     confidence,
     momentum,
     priceVsSma,
+    confluenceScore,
+    trendState: state.indicatorData.trendState,
     rv,
     iv,
     dte,
     expectedMove,
     rate: getRate() * 100,
-    explanation: modelExplanation(output, adjusted, momentum, priceVsSma, iv, rv, expectedMove)
+    explanation: modelExplanation(output, adjusted, momentum, priceVsSma, iv, rv, expectedMove, confluenceScore, state.indicatorData.trendState)
   };
 }
 
-function modelExplanation(output, score, momentum, priceVsSma, iv, rv, expectedMove) {
+function modelExplanation(output, score, momentum, priceVsSma, iv, rv, expectedMove, confluenceScore, trendState) {
   const direction = output === "CALL"
     ? "positive price momentum and trend alignment"
     : output === "PUT"
@@ -605,7 +837,7 @@ function modelExplanation(output, score, momentum, priceVsSma, iv, rv, expectedM
   const volText = iv > rv
     ? "implied volatility is above realized volatility, so premium sensitivity is important"
     : "realized volatility is above implied volatility, so the model allows wider movement";
-  return `The ${output} output comes from ${direction}. Momentum is ${pct(momentum)}, price versus short average is ${pct(priceVsSma)}, and the score is ${score.toFixed(1)}. ${volText}. The one-expiry expected move is about ${money(expectedMove)}.`;
+  return `The ${output} output comes from ${direction}. Momentum is ${pct(momentum)}, price versus short average is ${pct(priceVsSma)}, trend state is ${trendState}, and indicator confluence contributes ${confluenceScore.toFixed(1)} points. ${volText}. The one-expiry expected move is about ${money(expectedMove)}.`;
 }
 
 function renderModel() {
@@ -625,6 +857,8 @@ function renderModel() {
     ["Model score", model.score.toFixed(1)],
     ["Confidence", `${model.confidence.toFixed(0)}%`],
     ["Momentum", pct(model.momentum)],
+    ["Trend state", model.trendState],
+    ["Confluence", model.confluenceScore.toFixed(1)],
     ["Price vs avg", pct(model.priceVsSma)],
     ["Realized vol", `${model.rv.toFixed(1)}%`],
     ["IV input", `${model.iv.toFixed(0)}%`],
@@ -632,7 +866,33 @@ function renderModel() {
     ["DTE", `${model.dte} days`],
     ["Risk-free", `${model.rate.toFixed(2)}%`]
   ].map(([label, value]) => `<div class="signal"><span>${label}</span><strong>${value}</strong></div>`).join("");
+  renderConfluence();
   qs("modelExplanation").textContent = model.explanation;
+}
+
+function renderConfluence() {
+  const trend = state.indicatorData.trendState;
+  const pill = qs("trendStatePill");
+  if (pill) {
+    pill.textContent = `Trend: ${trend[0].toUpperCase()}${trend.slice(1)}`;
+    pill.className = `trend-pill ${trend}`;
+  }
+  qs("confluencePanel").innerHTML = state.indicatorData.confluence.map((item) => {
+    const enabled = (
+      item.label === "VWAP" ? state.indicators.vwap :
+      item.label === "EMA" ? state.indicators.ema :
+      item.label === "SMA" ? state.indicators.sma :
+      item.label === "Order block" ? state.indicators.orderBlocks :
+      item.label === "Fair value gap" ? state.indicators.fvg :
+      item.label === "Trend state" ? state.indicators.trend : true
+    );
+    const score = enabled ? item.score : 0;
+    const side = !enabled ? "neutral" : score > 0.5 ? "call" : score < -0.5 ? "put" : "neutral";
+    return `<div class="confluence-row ${side}">
+      <span>${item.label}${enabled ? "" : " (off)"}</span>
+      <strong>${item.value} · ${score > 0 ? "+" : ""}${score.toFixed(0)}</strong>
+    </div>`;
+  }).join("");
 }
 
 function buildWatchlist() {
@@ -799,6 +1059,7 @@ function renderPositions() {
 
 function renderAll(redrawChart = true) {
   renderQuote();
+  calculateIndicators();
   renderModel();
   renderChain();
   renderGreeks();
@@ -860,6 +1121,28 @@ function initChartEvents() {
   });
   qs("autoPulseInput").addEventListener("change", () => {
     savePrefs({ autoPulse: qs("autoPulseInput").checked });
+  });
+  qs("indicatorControls").addEventListener("change", (event) => {
+    const input = event.target.closest("input[data-indicator]");
+    if (!input) return;
+    state.indicators[input.dataset.indicator] = input.checked;
+    savePrefs({ indicators: state.indicators });
+    renderAll();
+  });
+  qs("resetIndicators").addEventListener("click", () => {
+    state.indicators = {
+      vwap: true,
+      sma: false,
+      ema: true,
+      orderBlocks: false,
+      fvg: false,
+      trend: true
+    };
+    document.querySelectorAll("[data-indicator]").forEach((input) => {
+      input.checked = Boolean(state.indicators[input.dataset.indicator]);
+    });
+    savePrefs({ indicators: state.indicators });
+    renderAll();
   });
   window.addEventListener("resize", resizeChart);
   state.pulseTimer = window.setInterval(pulseChart, 4500);

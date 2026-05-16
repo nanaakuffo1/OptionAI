@@ -240,6 +240,59 @@ h1 { margin: 0; font-size: clamp(24px, 3vw, 40px); letter-spacing: 0; }
   color: var(--blue);
   background: #0c2033;
 }
+.indicator-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #080d14;
+}
+.indicator-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #0b1018;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.indicator-bar input {
+  min-height: 14px;
+  width: 14px;
+  padding: 0;
+  accent-color: var(--blue);
+}
+.indicator-bar button {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  padding: 0 10px;
+  font-size: 12px;
+}
+.trend-pill {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #0b1018;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+.trend-pill.bullish { color: var(--green); border-color: rgba(66,217,130,.45); }
+.trend-pill.bearish { color: var(--red); border-color: rgba(255,100,115,.45); }
+.trend-pill.range, .trend-pill.neutral { color: var(--amber); border-color: rgba(245,185,66,.45); }
 #priceChart {
   width: 100%;
   display: block;
@@ -341,6 +394,26 @@ tr.atm td { background-color: rgba(106,180,255,.08); }
 .signal-list { display: grid; gap: 7px; }
 .signal { display: flex; justify-content: space-between; gap: 10px; padding: 8px; background: #0b1018; border-radius: 6px; color: var(--muted); }
 .signal strong { color: var(--text); }
+.confluence-panel {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+.confluence-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: #0b1018;
+  color: var(--muted);
+  font-size: 12px;
+}
+.confluence-row strong { color: var(--text); }
+.confluence-row.call strong { color: var(--green); }
+.confluence-row.put strong { color: var(--red); }
+.confluence-row.neutral strong { color: var(--amber); }
 .model-explanation {
   margin-top: 10px;
   padding: 10px;
@@ -395,4 +468,5 @@ tr.atm td { background-color: rgba(106,180,255,.08); }
   .chart-head { display: block; }
   .verdict { margin-top: 12px; }
   .chart-toolbar, .chart-foot { align-items: flex-start; flex-direction: column; }
+  .trend-pill { margin-left: 0; }
 }
