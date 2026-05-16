@@ -186,7 +186,7 @@ h1 { margin: 0; font-size: clamp(24px, 3vw, 40px); letter-spacing: 0; }
 
 .model-controls {
   display: grid;
-  grid-template-columns: repeat(3, minmax(150px, max-content));
+  grid-template-columns: repeat(4, minmax(130px, max-content));
   gap: 10px;
   align-items: end;
   margin-bottom: 12px;

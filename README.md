@@ -5,7 +5,7 @@ OptionAI is a protected options dashboard built from the original single-file pr
 It includes:
 
 - Supabase email/password sign-in gate for GitHub Pages
-- TradingView chart embed
+- Native OptionAI canvas chart with modeled pulse and optional secure live feed
 - Synthetic Black-Scholes options chain
 - Greeks calculator
 - Strategy cards
@@ -22,6 +22,23 @@ It includes:
 7. Add your GitHub Pages URL to Supabase Auth allowed redirect/site URLs.
 
 The anon key is safe to publish in frontend code when Row Level Security is enabled. Do not put service-role keys or paid market data API secrets in GitHub Pages code.
+
+## Secure live market data
+
+GitHub Pages cannot protect market-data API keys. OptionAI uses a Supabase Edge Function at `supabase/functions/market-data` so the browser can request prices without seeing the provider secret.
+
+The included function uses Polygon's `/v2/last/trade/{ticker}` endpoint. Polygon plan recency controls whether this is delayed or real-time. Their docs list Developer as 15-minute delayed and Advanced/Business + Expansion as real-time for this endpoint.
+
+Deploy:
+
+```bash
+supabase login
+supabase link --project-ref YOUR_PROJECT_REF
+supabase secrets set POLYGON_API_KEY=YOUR_POLYGON_KEY
+supabase functions deploy market-data
+```
+
+After deployment, open the app, sign in, and enable **Live Feed**. If the function or provider key is missing, the chart falls back to the modeled pulse.
 
 ## Optional Supabase database
 

@@ -76,6 +76,12 @@ const state = {
   candles: [],
   model: null,
   pulseTimer: null,
+  liveTimer: null,
+  live: {
+    active: false,
+    lastUpdate: null,
+    source: "model"
+  },
   positionId: 1,
   resetInputs: true
 };
@@ -108,10 +114,12 @@ function showApp(user) {
   qs("authScreen").classList.add("hidden");
   document.querySelector(".shell").classList.remove("auth-pending");
   resizeChart();
+  if (qs("liveFeedInput")?.checked) startLiveFeed();
 }
 
 function showAuth(message = "") {
   state.user = null;
+  stopLiveFeed();
   qs("authScreen").classList.remove("hidden");
   document.querySelector(".shell").classList.add("auth-pending");
   setAuthMessage(message);
@@ -406,7 +414,7 @@ function drawCrosshair(ctx, xFor, yFor, pad, width, height) {
 }
 
 function pulseChart() {
-  if (!qs("autoPulseInput").checked || !state.candles.length) return;
+  if (!qs("autoPulseInput").checked || !state.candles.length || state.live.active) return;
   const last = state.candles[state.candles.length - 1];
   const score = state.model ? state.model.score / 100 : 0;
   const iv = getIv() / 100;
@@ -429,6 +437,79 @@ function pulseChart() {
   state.change = ((state.price - state.candles[0].open) / state.candles[0].open) * 100;
   renderAll(false);
   qs("chartStatus").textContent = `Modeled pulse updated ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+}
+
+function stopLiveFeed() {
+  if (state.liveTimer) window.clearInterval(state.liveTimer);
+  state.liveTimer = null;
+  state.live.active = false;
+  state.live.source = "model";
+}
+
+function liveStatus(message) {
+  const el = qs("chartStatus");
+  if (el) el.textContent = message;
+}
+
+async function fetchLiveTrade() {
+  if (!qs("liveFeedInput").checked) return;
+  if (!supabaseClient || !state.user) {
+    state.live.active = false;
+    liveStatus("Live feed needs Supabase sign-in and deployed market-data function.");
+    return;
+  }
+
+  const { data, error } = await supabaseClient.functions.invoke("market-data", {
+    body: { ticker: state.ticker }
+  });
+
+  if (error) throw new Error(error.message || "Live feed request failed");
+  if (!data || typeof data.price !== "number") throw new Error("Live feed returned no price");
+
+  applyLiveTrade(data);
+}
+
+function applyLiveTrade(trade) {
+  const price = Number(trade.price);
+  if (!Number.isFinite(price) || price <= 0 || !state.candles.length) return;
+  const last = state.candles[state.candles.length - 1];
+  const open = last.close;
+  const spread = Math.max(open, price) * 0.0018;
+  state.candles.push({
+    t: last.t + 1,
+    open,
+    high: Math.max(open, price, trade.high || 0) + spread,
+    low: Math.max(0.1, Math.min(open, price, trade.low || Number.POSITIVE_INFINITY) - spread),
+    close: price,
+    volume: Number(trade.size || trade.volume || last.volume || 0)
+  });
+  while (state.candles.length > rangePoints()) state.candles.shift();
+  state.price = price;
+  state.change = ((state.price - state.candles[0].open) / state.candles[0].open) * 100;
+  state.live.active = true;
+  state.live.lastUpdate = new Date();
+  state.live.source = trade.source || "Live feed";
+  renderAll(false);
+  liveStatus(`${state.live.source} updated ${state.live.lastUpdate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`);
+}
+
+function startLiveFeed() {
+  stopLiveFeed();
+  if (!qs("liveFeedInput").checked) {
+    liveStatus("Modeled pulse. No private market-data key exposed.");
+    return;
+  }
+  liveStatus("Starting secure live feed...");
+  fetchLiveTrade().catch((error) => {
+    state.live.active = false;
+    liveStatus(`Live feed unavailable: ${error.message}. Using modeled pulse fallback.`);
+  });
+  state.liveTimer = window.setInterval(() => {
+    fetchLiveTrade().catch((error) => {
+      state.live.active = false;
+      liveStatus(`Live feed unavailable: ${error.message}. Using modeled pulse fallback.`);
+    });
+  }, 10000);
 }
 
 function realizedVol() {
@@ -693,12 +774,14 @@ function renderAll(redrawChart = true) {
 function analyze(ticker, resetChart = true) {
   state.ticker = (ticker || state.ticker).trim().toUpperCase();
   state.resetInputs = true;
+  stopLiveFeed();
   const known = quotes[state.ticker] || syntheticQuote(state.ticker);
   state.price = known[0];
   state.change = known[1];
   qs("tickerInput").value = state.ticker;
   if (resetChart) generateCandles(state.ticker);
   renderAll();
+  if (qs("liveFeedInput").checked) startLiveFeed();
 }
 
 function initChartEvents() {
@@ -729,6 +812,11 @@ function initChartEvents() {
     state.chartMode = button.dataset.mode;
     document.querySelectorAll("#chartModeButtons button").forEach((item) => item.classList.toggle("active", item === button));
     drawChart();
+  });
+  qs("liveFeedInput").addEventListener("change", () => {
+    if (qs("liveFeedInput").checked) startLiveFeed();
+    else stopLiveFeed();
+    if (!qs("liveFeedInput").checked) liveStatus("Modeled pulse. No private market-data key exposed.");
   });
   window.addEventListener("resize", resizeChart);
   state.pulseTimer = window.setInterval(pulseChart, 4500);
