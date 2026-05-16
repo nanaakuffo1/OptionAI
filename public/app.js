@@ -109,7 +109,9 @@ const state = {
     quotes: {},
     baseline: {}
   },
-  dashboard: "focus",
+  dashboard: "command",
+  decision: null,
+  setups: [],
   positionId: 1,
   resetInputs: true
 };
@@ -162,11 +164,13 @@ function applyPrefs() {
       button.classList.toggle("active", button.dataset.mode === state.chartMode);
     });
   }
-  if (prefs.dashboard) setDashboard(prefs.dashboard, false);
+  setDashboard(prefs.dashboard || state.dashboard, false);
 }
 
 function setDashboard(mode, persist = true) {
-  state.dashboard = ["focus", "research", "portfolio"].includes(mode) ? mode : "focus";
+  const aliases = { focus: "command", research: "chart" };
+  const next = aliases[mode] || mode;
+  state.dashboard = ["command", "chart", "flow", "execution", "portfolio"].includes(next) ? next : "command";
   document.querySelector(".workspace")?.setAttribute("data-dashboard", state.dashboard);
   document.querySelectorAll("[data-dashboard]").forEach((button) => {
     button.classList.toggle("active", button.dataset.dashboard === state.dashboard);
@@ -1000,11 +1004,215 @@ function renderConfluence() {
   }).join("");
 }
 
+function tacticalLevels() {
+  const last = state.candles[state.candles.length - 1];
+  const highs = state.candles.map((c) => c.high);
+  const lows = state.candles.map((c) => c.low);
+  const recent = state.candles.slice(-Math.min(24, state.candles.length));
+  const recentHigh = Math.max(...recent.map((c) => c.high));
+  const recentLow = Math.min(...recent.map((c) => c.low));
+  const priorHigh = Math.max(...highs.slice(0, Math.max(1, highs.length - 24)));
+  const priorLow = Math.min(...lows.slice(0, Math.max(1, lows.length - 24)));
+  const vwap = state.indicatorData.vwap[state.indicatorData.vwap.length - 1] || last.close;
+  const ema = state.indicatorData.ema[state.indicatorData.ema.length - 1] || last.close;
+  const expected = state.model?.expectedMove || last.close * getIv() / 100 * Math.sqrt(getT());
+  return {
+    last,
+    vwap,
+    ema,
+    recentHigh,
+    recentLow,
+    previousHigh: priorHigh,
+    previousLow: priorLow,
+    triggerLong: Math.max(recentHigh, vwap, ema),
+    triggerShort: Math.min(recentLow, vwap, ema),
+    invalidLong: Math.min(vwap, ema, recentLow),
+    invalidShort: Math.max(vwap, ema, recentHigh),
+    targetLong: last.close + expected * 0.55,
+    targetShort: last.close - expected * 0.55
+  };
+}
+
+function marketRegime(levels) {
+  const rv = state.model?.rv || realizedVol();
+  const iv = getIv();
+  const trend = state.indicatorData.trendState;
+  const rangePct = ((levels.recentHigh - levels.recentLow) / Math.max(0.01, state.price)) * 100;
+  if (trend === "bullish" || trend === "bearish") return "Trend day";
+  if (iv > rv * 1.25 && Math.abs(state.model?.confluenceScore || 0) < 18) return "Squeeze environment";
+  if (rangePct < Math.max(0.8, iv / 55)) return "Low liquidity chop";
+  if (rv > iv * 0.9) return "Volatility expansion";
+  if (trend === "range") return "Mean reversion environment";
+  return "Range day";
+}
+
+function setupScore(base, urgency, rr) {
+  return clamp(base + urgency * 8 + Math.min(18, rr * 7), 5, 98);
+}
+
+function buildTradeSetups(levels, regime) {
+  const model = state.model;
+  const direction = model.output;
+  const confluence = model.confluenceScore;
+  const momentum = Math.abs(model.momentum);
+  const longBias = direction === "CALL" ? 18 : direction === "PUT" ? -14 : 0;
+  const shortBias = direction === "PUT" ? 18 : direction === "CALL" ? -14 : 0;
+  const volBoost = regime.includes("Volatility") || regime.includes("Trend") ? 8 : regime.includes("chop") ? -12 : 0;
+  const setups = [
+    {
+      name: "VWAP reclaim long",
+      side: "LONG",
+      entry: levels.triggerLong,
+      invalidation: levels.invalidLong,
+      target: levels.targetLong,
+      base: 46 + longBias + confluence * 0.18 + volBoost,
+      urgency: state.price > levels.vwap ? 3 : 1,
+      note: "Needs price acceptance above VWAP/EMA with volume expansion."
+    },
+    {
+      name: "Failed breakout short",
+      side: "SHORT",
+      entry: levels.recentHigh,
+      invalidation: levels.recentHigh + Math.abs(levels.recentHigh - levels.invalidLong) * 0.35,
+      target: levels.vwap,
+      base: 42 + shortBias - confluence * 0.08 + (regime.includes("Range") ? 10 : 0),
+      urgency: state.price < levels.recentHigh && direction !== "CALL" ? 3 : 1,
+      note: "Looks for rejection after liquidity above the range is swept."
+    },
+    {
+      name: "Momentum continuation",
+      side: direction === "PUT" ? "SHORT" : "LONG",
+      entry: direction === "PUT" ? levels.triggerShort : levels.triggerLong,
+      invalidation: direction === "PUT" ? levels.invalidShort : levels.invalidLong,
+      target: direction === "PUT" ? levels.targetShort : levels.targetLong,
+      base: 38 + Math.abs(model.score) * 0.34 + momentum * 1.8 + volBoost,
+      urgency: Math.abs(model.score) > 45 ? 4 : 2,
+      note: "Only improves when momentum expands in the model direction."
+    },
+    {
+      name: "Mean reversion scalp",
+      side: state.price > levels.vwap ? "SHORT" : "LONG",
+      entry: state.price > levels.vwap ? levels.recentHigh : levels.recentLow,
+      invalidation: state.price > levels.vwap ? levels.recentHigh + model.expectedMove * 0.22 : levels.recentLow - model.expectedMove * 0.22,
+      target: levels.vwap,
+      base: 44 + (regime.includes("Mean") || regime.includes("Range") ? 18 : -8),
+      urgency: regime.includes("Mean") ? 3 : 1,
+      note: "Best when price stretches away from VWAP without volume confirmation."
+    },
+    {
+      name: "Gamma pin / patience",
+      side: "WAIT",
+      entry: levels.vwap,
+      invalidation: levels.recentHigh,
+      target: levels.recentLow,
+      base: 50 + (regime.includes("chop") || regime.includes("Squeeze") ? 18 : -5) - Math.abs(model.score) * 0.18,
+      urgency: 1,
+      note: "Avoid forcing direction while price is pinned near VWAP or max-pain proxy."
+    }
+  ];
+
+  return setups.map((setup) => {
+    const risk = Math.max(0.01, Math.abs(setup.entry - setup.invalidation));
+    const reward = Math.max(0.01, Math.abs(setup.target - setup.entry));
+    const rr = reward / risk;
+    const score = setupScore(setup.base, setup.urgency, rr);
+    return {
+      ...setup,
+      rr,
+      score,
+      probability: score >= 75 ? "High" : score >= 58 ? "Medium" : "Low",
+      urgencyLabel: setup.urgency >= 4 ? "Immediate" : setup.urgency >= 3 ? "Soon" : "Wait"
+    };
+  }).sort((a, b) => b.score - a.score);
+}
+
+function flowMap(levels) {
+  const expected = state.model?.expectedMove || state.price * getIv() / 100 * Math.sqrt(getT());
+  const callWall = r5(state.price + expected * 0.65);
+  const putWall = r5(state.price - expected * 0.65);
+  const maxPain = r5((callWall + putWall + state.price) / 3);
+  const gammaFlip = r5(levels.vwap);
+  const dealerBias = state.price > gammaFlip ? "Long gamma above flip" : "Short gamma below flip";
+  return {
+    callWall,
+    putWall,
+    maxPain,
+    gammaFlip,
+    dealerBias,
+    pressure: Math.abs(state.price - maxPain) / Math.max(0.01, expected) < 0.35 ? "Pin risk elevated" : "Expansion room open"
+  };
+}
+
+function buildSmartAlerts(levels, regime) {
+  const model = state.model;
+  const alerts = [];
+  if (state.price > levels.triggerLong) alerts.push(["VWAP reclaim", `Price is above ${money(levels.vwap)}; continuation needs volume follow-through.`]);
+  if (state.price < levels.triggerShort) alerts.push(["Breakdown risk", `Price is below key support near ${money(levels.triggerShort)}.`]);
+  if (Math.abs(model.momentum) < 0.35) alerts.push(["Momentum stall", "Momentum is flat; avoid chasing until expansion returns."]);
+  if (regime.includes("chop")) alerts.push(["Chop warning", "Range is compressed; false breaks are more likely."]);
+  if (model.confidence > 70) alerts.push(["Edge improving", `Model confidence is ${model.confidence.toFixed(0)}%; wait for the listed trigger.`]);
+  return alerts.slice(0, 4);
+}
+
+function renderDecisionEngine() {
+  const levels = tacticalLevels();
+  const regime = marketRegime(levels);
+  const setups = buildTradeSetups(levels, regime);
+  const best = setups[0];
+  const flow = flowMap(levels);
+  const readiness = clamp(best.score * 0.72 + state.model.confidence * 0.28 - (best.side === "WAIT" ? 18 : 0), 0, 99);
+  const decision = best.side === "WAIT" || readiness < 55 ? "WAIT" : best.side === "LONG" ? "LONG" : "SHORT";
+  const decisionClass = decision === "LONG" ? "call" : decision === "SHORT" ? "put" : "neutral";
+  const alerts = buildSmartAlerts(levels, regime);
+  state.decision = { decision, readiness, regime, levels, flow, best };
+  state.setups = setups;
+
+  qs("tradeDecision").textContent = decision;
+  qs("tradeDecision").className = decisionClass;
+  qs("tradeDecisionWhy").textContent = decision === "WAIT" ? "Edge is not clean enough yet." : `${best.name} is active if trigger confirms.`;
+  qs("readinessScore").textContent = `${readiness.toFixed(0)}/100`;
+  qs("readinessLabel").textContent = `${regime} · ${state.model.output}`;
+  qs("bestSetupName").textContent = best.name;
+  qs("bestSetupMeta").textContent = `${best.probability} probability · ${best.urgencyLabel}`;
+  qs("keyLevel").textContent = money(best.entry);
+  qs("keyLevelMeta").textContent = `Invalidates ${money(best.invalidation)}`;
+  qs("assistantHeadline").textContent = decision === "WAIT" ? "Patience is the edge" : `${decision} plan is forming`;
+  qs("assistantPlan").textContent = `${best.note} Entry zone ${money(best.entry)}, invalidation ${money(best.invalidation)}, target ${money(best.target)}. ${flow.pressure}.`;
+  qs("marketStory").textContent = marketStoryText(regime, levels, flow, best, decision);
+  qs("setupList").innerHTML = setups.map((setup) => setupCard(setup)).join("");
+  qs("flowMap").innerHTML = `
+    <div class="flow-grid">
+      <div><span>Gamma flip</span><strong>${money(flow.gammaFlip)}</strong></div>
+      <div><span>Call wall</span><strong>${money(flow.callWall)}</strong></div>
+      <div><span>Put wall</span><strong>${money(flow.putWall)}</strong></div>
+      <div><span>Max pain proxy</span><strong>${money(flow.maxPain)}</strong></div>
+    </div>
+    <p>${flow.dealerBias}. ${flow.pressure}. Flow metrics are modeled until an options-flow provider is connected.</p>`;
+  qs("smartAlerts").innerHTML = alerts.length
+    ? alerts.map(([title, body]) => `<div class="smart-alert"><strong>${title}</strong><span>${body}</span></div>`).join("")
+    : `<div class="smart-alert"><strong>No tactical alert</strong><span>Wait for price to approach a trigger level.</span></div>`;
+}
+
+function setupCard(setup) {
+  const sideClass = setup.side === "LONG" ? "call" : setup.side === "SHORT" ? "put" : "neutral";
+  return `<article class="setup-row ${sideClass}">
+    <div><strong>${setup.name}</strong><span>${setup.side} · ${setup.probability} · ${setup.urgencyLabel}</span></div>
+    <b>${setup.score.toFixed(0)}</b>
+    <small>Entry ${money(setup.entry)} · Stop ${money(setup.invalidation)} · Target ${money(setup.target)} · R/R ${setup.rr.toFixed(2)}</small>
+  </article>`;
+}
+
+function marketStoryText(regime, levels, flow, best, decision) {
+  const control = state.indicatorData.trendState === "bullish" ? "buyers are controlling VWAP" : state.indicatorData.trendState === "bearish" ? "sellers are controlling VWAP" : "control is mixed around VWAP";
+  const action = decision === "WAIT" ? "Directional trades remain lower quality until price accepts beyond the trigger." : `${decision} setups improve if price accepts through ${money(best.entry)} with momentum expansion.`;
+  return `${control}; current regime reads as ${regime.toLowerCase()}. ${flow.dealerBias.toLowerCase()} with ${flow.pressure.toLowerCase()}. ${action}`;
+}
+
 function buildWatchlist() {
   qs("watchlist").innerHTML = WL.map(([name, tickers]) => `
     <div class="watch-category">
       <h3>${name}</h3>
-      ${tickers.map((ticker) => `<button class="watch-row" type="button" data-ticker="${ticker}"><strong>${ticker}</strong><span data-watch-price="${ticker}">${money(currentPriceFor(ticker))}</span></button>`).join("")}
+      ${tickers.map((ticker) => watchRow(ticker)).join("")}
     </div>
   `).join("");
   document.querySelectorAll(".watch-row").forEach((button) => {
@@ -1012,11 +1220,35 @@ function buildWatchlist() {
   });
 }
 
+function tickerHeat(ticker) {
+  const change = currentChangeFor(ticker);
+  const live = Boolean(state.live.quotes[ticker]);
+  const volSeed = (hashTicker(ticker) % 38) + 42;
+  const score = clamp(48 + Math.abs(change) * 8 + (live ? 8 : 0) + (volSeed - 55) * 0.35, 0, 99);
+  const tag = score > 75 ? "READY" : score > 60 ? "WATCH" : change >= 0 ? "RS+" : "WAIT";
+  return { score, tag, change };
+}
+
+function watchRow(ticker) {
+  const heat = tickerHeat(ticker);
+  const side = heat.change >= 0 ? "up" : "down";
+  return `<button class="watch-row" type="button" data-ticker="${ticker}">
+    <strong>${ticker}</strong>
+    <span class="watch-meta"><em class="${side}">${heat.tag}</em><span data-watch-price="${ticker}">${money(currentPriceFor(ticker))}</span></span>
+  </button>`;
+}
+
 function renderWatchlistPrices() {
   document.querySelectorAll("[data-watch-price]").forEach((el) => {
     const ticker = el.dataset.watchPrice;
     el.textContent = money(currentPriceFor(ticker));
     el.className = state.live.quotes[ticker] ? "live-price" : "";
+    const meta = el.closest(".watch-row")?.querySelector("em");
+    if (meta) {
+      const heat = tickerHeat(ticker);
+      meta.textContent = heat.tag;
+      meta.className = heat.change >= 0 ? "up" : "down";
+    }
   });
 }
 
@@ -1179,6 +1411,7 @@ function renderAll(redrawChart = true) {
   renderQuote();
   calculateIndicators();
   renderModel();
+  renderDecisionEngine();
   renderChain();
   renderGreeks();
   renderStrategies();

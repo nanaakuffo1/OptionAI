@@ -47,8 +47,10 @@
         <button type="submit">Run Model</button>
       </form>
       <div class="view-switcher" id="dashboardSwitcher" aria-label="Dashboard view">
-        <button type="button" data-dashboard="focus" class="active">Focus</button>
-        <button type="button" data-dashboard="research">Research</button>
+        <button type="button" data-dashboard="command" class="active">Command</button>
+        <button type="button" data-dashboard="chart">Chart</button>
+        <button type="button" data-dashboard="flow">Flow</button>
+        <button type="button" data-dashboard="execution">Execution</button>
         <button type="button" data-dashboard="portfolio">Portfolio</button>
       </div>
       <button class="logout" id="logoutButton" type="button">Logout</button>
@@ -65,6 +67,29 @@
           </div>
           <div class="verdict" id="verdictPill">NEUTRAL</div>
         </div>
+        <section class="command-center" id="commandCenter">
+          <div class="decision-card primary">
+            <span>Trade Decision</span>
+            <strong id="tradeDecision">WAIT</strong>
+            <small id="tradeDecisionWhy">Calculating edge...</small>
+          </div>
+          <div class="decision-card">
+            <span>Readiness</span>
+            <strong id="readinessScore">--</strong>
+            <small id="readinessLabel">No signal</small>
+          </div>
+          <div class="decision-card">
+            <span>Best Setup</span>
+            <strong id="bestSetupName">Patience</strong>
+            <small id="bestSetupMeta">No trigger yet</small>
+          </div>
+          <div class="decision-card">
+            <span>Key Level</span>
+            <strong id="keyLevel">--</strong>
+            <small id="keyLevelMeta">Trigger / invalidation</small>
+          </div>
+        </section>
+        <section class="market-story" id="marketStory">Market story loading...</section>
         <div class="model-controls">
           <label>Trend <select id="trendInput"><option value="short">Short</option><option value="balanced" selected>Balanced</option><option value="long">Long</option></select></label>
           <label>Vol Regime <select id="volRegimeInput"><option value="low">Low</option><option value="normal" selected>Normal</option><option value="high">High</option></select></label>
@@ -145,6 +170,23 @@
       </section>
 
       <aside class="right-rail">
+        <section class="assistant-card">
+          <div class="section-label">AI Execution Assistant</div>
+          <h2 id="assistantHeadline">Stay patient</h2>
+          <p id="assistantPlan"></p>
+        </section>
+        <section class="setup-card">
+          <div class="section-label">Ranked Setups</div>
+          <div id="setupList"></div>
+        </section>
+        <section class="flow-card">
+          <div class="section-label">Dealer / Flow Map</div>
+          <div id="flowMap"></div>
+        </section>
+        <section class="alert-card">
+          <div class="section-label">Smart Alerts</div>
+          <div id="smartAlerts"></div>
+        </section>
         <section class="model-card">
           <div class="section-label">Statistical Signal</div>
           <h2 id="modelTitle">Neutral model output</h2>
