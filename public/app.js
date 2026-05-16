@@ -98,7 +98,9 @@ const state = {
   live: {
     active: false,
     lastUpdate: null,
-    source: "model"
+    source: "model",
+    quotes: {},
+    baseline: {}
   },
   positionId: 1,
   resetInputs: true
@@ -338,6 +340,29 @@ function syntheticQuote(ticker) {
   const price = 25 + (seed % 260);
   const change = ((seed % 700) - 350) / 100;
   return [price, change];
+}
+
+function allDashboardTickers() {
+  return [...new Set([
+    ...WL.flatMap(([, tickers]) => tickers),
+    state.ticker,
+    ...state.positions.map((pos) => pos.symbol)
+  ].filter(Boolean).map((ticker) => ticker.toUpperCase()))];
+}
+
+function currentPriceFor(ticker) {
+  const symbol = ticker.toUpperCase();
+  return state.live.quotes[symbol]?.price ?? (quotes[symbol] || syntheticQuote(symbol))[0];
+}
+
+function currentChangeFor(ticker) {
+  const symbol = ticker.toUpperCase();
+  const live = state.live.quotes[symbol];
+  if (live) {
+    const base = state.live.baseline[symbol] || live.price;
+    return base ? ((live.price - base) / base) * 100 : 0;
+  }
+  return (quotes[symbol] || syntheticQuote(symbol))[1] || 0;
 }
 
 function rollingSma(period = 20) {
@@ -754,14 +779,37 @@ async function fetchLiveTrade() {
     return;
   }
 
+  const tickers = allDashboardTickers();
   const { data, error } = await supabaseClient.functions.invoke("market-data", {
-    body: { ticker: state.ticker }
+    body: { tickers }
   });
 
   if (error) throw new Error(error.message || "Live feed request failed");
-  if (!data || typeof data.price !== "number") throw new Error("Live feed returned no price");
+  if (!data) throw new Error("Live feed returned no data");
 
-  applyLiveTrade(data);
+  if (Array.isArray(data.quotes)) applyLiveQuotes(data.quotes);
+  else if (typeof data.price === "number") applyLiveQuotes([data]);
+  else throw new Error("Live feed returned no prices");
+}
+
+function applyLiveQuotes(feedQuotes) {
+  const now = new Date();
+  feedQuotes.forEach((quote) => {
+    const symbol = String(quote.ticker || "").toUpperCase();
+    const price = Number(quote.price);
+    if (!symbol || !Number.isFinite(price) || price <= 0) return;
+    if (!state.live.baseline[symbol]) state.live.baseline[symbol] = currentPriceFor(symbol);
+    state.live.quotes[symbol] = {
+      ...quote,
+      ticker: symbol,
+      price,
+      updatedAt: now
+    };
+  });
+
+  const selected = state.live.quotes[state.ticker];
+  if (!selected) throw new Error(`No live price for ${state.ticker}`);
+  applyLiveTrade(selected);
 }
 
 function applyLiveTrade(trade) {
@@ -785,7 +833,7 @@ function applyLiveTrade(trade) {
   state.live.lastUpdate = new Date();
   state.live.source = trade.source || "Live feed";
   renderAll(false);
-  liveStatus(`${state.live.source} updated ${state.live.lastUpdate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`);
+  liveStatus(`${state.live.source} updated ${allDashboardTickers().length} dashboard tickers at ${state.live.lastUpdate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`);
 }
 
 function startLiveFeed() {
@@ -937,11 +985,19 @@ function buildWatchlist() {
   qs("watchlist").innerHTML = WL.map(([name, tickers]) => `
     <div class="watch-category">
       <h3>${name}</h3>
-      ${tickers.map((ticker) => `<button class="watch-row" type="button" data-ticker="${ticker}"><strong>${ticker}</strong><span>${money((quotes[ticker] || syntheticQuote(ticker))[0])}</span></button>`).join("")}
+      ${tickers.map((ticker) => `<button class="watch-row" type="button" data-ticker="${ticker}"><strong>${ticker}</strong><span data-watch-price="${ticker}">${money(currentPriceFor(ticker))}</span></button>`).join("")}
     </div>
   `).join("");
   document.querySelectorAll(".watch-row").forEach((button) => {
     button.addEventListener("click", () => analyze(button.dataset.ticker, true));
+  });
+}
+
+function renderWatchlistPrices() {
+  document.querySelectorAll("[data-watch-price]").forEach((el) => {
+    const ticker = el.dataset.watchPrice;
+    el.textContent = money(currentPriceFor(ticker));
+    el.className = state.live.quotes[ticker] ? "live-price" : "";
   });
 }
 
@@ -950,6 +1006,10 @@ function setActiveTicker() {
 }
 
 function renderQuote() {
+  if (state.live.quotes[state.ticker]) {
+    state.price = state.live.quotes[state.ticker].price;
+    state.change = currentChangeFor(state.ticker);
+  }
   qs("quoteTicker").textContent = state.ticker;
   qs("quotePrice").textContent = money(state.price);
   qs("quoteChange").textContent = pct(state.change);
@@ -964,6 +1024,7 @@ function renderQuote() {
     state.resetInputs = false;
   }
   setActiveTicker();
+  renderWatchlistPrices();
 }
 
 function renderChain() {
@@ -1056,7 +1117,7 @@ function loadScenario(index) {
 }
 
 function positionMark(pos) {
-  const sourcePrice = pos.symbol === state.ticker ? state.price : (quotes[pos.symbol] || syntheticQuote(pos.symbol))[0];
+  const sourcePrice = pos.symbol === state.ticker ? state.price : currentPriceFor(pos.symbol);
   const res = bs(sourcePrice, pos.strike, getT(pos.expiry), getRate(), getIv() / 100, pos.type);
   return res ? Math.max(0.01, res.price) : pos.premium;
 }
@@ -1111,9 +1172,8 @@ function analyze(ticker, resetChart = true) {
   state.ticker = (ticker || state.ticker).trim().toUpperCase();
   state.resetInputs = true;
   stopLiveFeed();
-  const known = quotes[state.ticker] || syntheticQuote(state.ticker);
-  state.price = known[0];
-  state.change = known[1];
+  state.price = currentPriceFor(state.ticker);
+  state.change = currentChangeFor(state.ticker);
   qs("tickerInput").value = state.ticker;
   if (resetChart) generateCandles(state.ticker);
   renderAll();
@@ -1241,6 +1301,9 @@ function init() {
     });
     ["posPremium", "posStop", "posTarget"].forEach((id) => { qs(id).value = ""; });
     renderPositions();
+    if (qs("liveFeedInput").checked) {
+      fetchLiveTrade().catch((error) => liveStatus(`Live feed unavailable: ${error.message}. Using latest cached prices.`));
+    }
   });
 
   analyze("AAPL", true);

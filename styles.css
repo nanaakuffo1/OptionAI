@@ -166,6 +166,7 @@ button { cursor: pointer; }
 }
 .watch-row.active, .watch-row:hover { border-color: var(--line); background: var(--panel-2); color: var(--text); }
 .watch-row span:last-child { font-size: 12px; color: var(--muted); }
+.watch-row .live-price { color: var(--green) !important; }
 
 .center { min-width: 0; padding: 18px; }
 .chart-head { display: flex; justify-content: space-between; gap: 16px; align-items: start; margin-bottom: 14px; }
