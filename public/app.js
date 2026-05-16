@@ -139,6 +139,7 @@ function applyPrefs() {
   document.querySelectorAll("[data-indicator]").forEach((input) => {
     input.checked = Boolean(state.indicators[input.dataset.indicator]);
   });
+  renderIndicatorControls();
   if (prefs.chartRange) {
     state.chartRange = prefs.chartRange;
     document.querySelectorAll("#rangeButtons button").forEach((button) => {
@@ -151,6 +152,13 @@ function applyPrefs() {
       button.classList.toggle("active", button.dataset.mode === state.chartMode);
     });
   }
+}
+
+function renderIndicatorControls() {
+  document.querySelectorAll("[data-indicator]").forEach((input) => {
+    input.checked = Boolean(state.indicators[input.dataset.indicator]);
+    input.closest("label")?.classList.toggle("active", input.checked);
+  });
 }
 
 const supabaseConfig = window.OPTIONAI_SUPABASE || {};
@@ -544,15 +552,26 @@ function drawIndicatorZones(ctx, xFor, yFor, pad, width, height) {
     state.indicatorData.orderBlocks.forEach((zone) => {
       drawZone(zone, zone.type === "bullish" ? "rgba(66, 217, 130, 0.08)" : "rgba(255, 100, 115, 0.08)");
     });
+    if (!state.indicatorData.orderBlocks.length) drawNoZoneNote(ctx, "No order block zones detected", pad.left + 12, pad.top + 42);
   }
   if (state.indicators.fvg) {
     state.indicatorData.fvg.forEach((zone) => {
       drawZone(zone, zone.type === "bullish" ? "rgba(106, 180, 255, 0.07)" : "rgba(245, 185, 66, 0.07)");
     });
+    if (!state.indicatorData.fvg.length) drawNoZoneNote(ctx, "No fair value gaps detected", pad.left + 12, pad.top + (state.indicators.orderBlocks ? 66 : 42));
   }
 }
 
-function drawSeriesLine(ctx, series, xFor, yFor, color, dash = []) {
+function drawNoZoneNote(ctx, text, x, y) {
+  const width = ctx.measureText ? ctx.measureText(text).width + 14 : 160;
+  ctx.fillStyle = "rgba(11, 16, 24, 0.78)";
+  ctx.fillRect(x, y, width, 22);
+  ctx.fillStyle = "rgba(141, 152, 168, 0.9)";
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.fillText(text, x + 7, y + 15);
+}
+
+function drawSeriesLine(ctx, series, xFor, yFor, color, dash = [], label = "") {
   ctx.beginPath();
   let started = false;
   series.forEach((value, index) => {
@@ -568,16 +587,35 @@ function drawSeriesLine(ctx, series, xFor, yFor, color, dash = []) {
   });
   if (!started) return;
   ctx.strokeStyle = color;
-  ctx.lineWidth = 1.6;
+  ctx.lineWidth = 2.4;
   ctx.setLineDash(dash);
   ctx.stroke();
   ctx.setLineDash([]);
+
+  if (label) {
+    let lastIndex = series.length - 1;
+    while (lastIndex >= 0 && (series[lastIndex] === null || !Number.isFinite(series[lastIndex]))) lastIndex -= 1;
+    const value = series[lastIndex];
+    if (value !== null && Number.isFinite(value)) {
+      const x = xFor(lastIndex);
+      const y = yFor(value);
+      const text = `${label} ${money(value)}`;
+      const boxWidth = ctx.measureText ? ctx.measureText(text).width + 12 : 92;
+      ctx.fillStyle = "rgba(6, 8, 13, 0.86)";
+      ctx.fillRect(x - boxWidth - 8, y - 10, boxWidth, 20);
+      ctx.strokeStyle = color;
+      ctx.strokeRect(x - boxWidth - 8, y - 10, boxWidth, 20);
+      ctx.fillStyle = color;
+      ctx.font = "11px system-ui, sans-serif";
+      ctx.fillText(text, x - boxWidth - 2, y + 4);
+    }
+  }
 }
 
 function drawIndicatorLines(ctx, xFor, yFor) {
-  if (state.indicators.vwap) drawSeriesLine(ctx, state.indicatorData.vwap, xFor, yFor, "rgba(245, 185, 66, 0.78)", [5, 4]);
-  if (state.indicators.sma) drawSeriesLine(ctx, state.indicatorData.sma, xFor, yFor, "rgba(185, 144, 255, 0.72)", [2, 4]);
-  if (state.indicators.ema) drawSeriesLine(ctx, state.indicatorData.ema, xFor, yFor, "rgba(106, 180, 255, 0.82)");
+  if (state.indicators.vwap) drawSeriesLine(ctx, state.indicatorData.vwap, xFor, yFor, "rgba(245, 185, 66, 0.95)", [6, 4], "VWAP");
+  if (state.indicators.sma) drawSeriesLine(ctx, state.indicatorData.sma, xFor, yFor, "rgba(185, 144, 255, 0.92)", [2, 4], "SMA");
+  if (state.indicators.ema) drawSeriesLine(ctx, state.indicatorData.ema, xFor, yFor, "rgba(106, 180, 255, 0.96)", [], "EMA");
 }
 
 function drawTrendBadge(ctx, pad) {
@@ -1126,8 +1164,10 @@ function initChartEvents() {
     const input = event.target.closest("input[data-indicator]");
     if (!input) return;
     state.indicators[input.dataset.indicator] = input.checked;
+    renderIndicatorControls();
     savePrefs({ indicators: state.indicators });
     renderAll();
+    liveStatus(`Indicators updated: ${Object.entries(state.indicators).filter(([, enabled]) => enabled).map(([name]) => name).join(", ") || "none"}`);
   });
   qs("resetIndicators").addEventListener("click", () => {
     state.indicators = {
@@ -1141,8 +1181,10 @@ function initChartEvents() {
     document.querySelectorAll("[data-indicator]").forEach((input) => {
       input.checked = Boolean(state.indicators[input.dataset.indicator]);
     });
+    renderIndicatorControls();
     savePrefs({ indicators: state.indicators });
     renderAll();
+    liveStatus("Indicators reset to clean default: VWAP, EMA, Trend.");
   });
   window.addEventListener("resize", resizeChart);
   state.pulseTimer = window.setInterval(pulseChart, 4500);

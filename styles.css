@@ -261,6 +261,12 @@ h1 { margin: 0; font-size: clamp(24px, 3vw, 40px); letter-spacing: 0; }
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.indicator-bar label.active {
+  border-color: rgba(106,180,255,.72);
+  background: #0c2033;
+  color: var(--text);
 }
 .indicator-bar input {
   min-height: 14px;
